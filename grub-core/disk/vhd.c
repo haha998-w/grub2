@@ -178,6 +178,9 @@ grub_vhd_iterate (grub_disk_dev_iterate_hook_t hook, void *hook_data,
     }
   return 0;
 }
+struct vhddynheader dynheader;
+grub_uint32_t density;
+grub_uint32_t *bat_cache;
 
 static grub_err_t
 grub_vhd_open (const char *name, grub_disk_t disk)
@@ -200,6 +203,17 @@ grub_vhd_open (const char *name, grub_disk_t disk)
   disk->id = dev->id;
   disk->data = dev;
 
+  grub_file_t file = ((struct grub_vhd *) disk->data)->file;
+  grub_file_seek(file,512);
+  grub_file_read(file,&dynheader,1024);
+
+  density=(grub_swap_bytes32(dynheader.blocsize))>>9;
+
+  gurb_file_seek(file, grub_swap_bytes64(dynheader.BAT));
+  // How to get VHD's BAT size  
+  grub_uint32_t bat_table_size = grub_swap_bytes32(dynheader.maxentries) * 4; // 每个表项 4 字节
+  bat_cache = malloc(bat_table_size); 
+  grub_file_read(file, bat_cache, bat_table_size);
 
   return 0;
 }
@@ -210,18 +224,16 @@ grub_vhd_read (grub_disk_t disk, grub_disk_addr_t sector,
 {
   grub_file_t file = ((struct grub_vhd *) disk->data)->file;
 
-  struct vhddynheader dynheader;
-  grub_file_seek(file,512);
-  grub_file_read(file,&dynheader,1024);
-
-  grub_uint32_t density=(grub_swap_bytes32(dynheader.blocsize))>>9;
   grub_uint64_t offsetbloc;
   long long unsigned int nb_bloc=grub_divmod64(sector,density,&offsetbloc);
 
-  grub_file_seek (file,grub_swap_bytes64(dynheader.BAT)+(nb_bloc<<2));
+  //grub_file_seek (file,grub_swap_bytes64(dynheader.BAT)+(nb_bloc<<2));
   grub_uint32_t blocpos;
-  grub_file_read(file,&blocpos,sizeof(blocpos));
-
+  // grub_file_read(file,&blocpos,sizeof(blocpos));
+  blocpos = bat_cache[nb_bloc];
+  if (blocpos == 0xFFFFFFFF) {
+    return 1;
+  }
   long long unsigned int finalpos=(long long unsigned int)((grub_swap_bytes32(blocpos)+1+offsetbloc)<<9);
 
   grub_file_seek (file,finalpos);
